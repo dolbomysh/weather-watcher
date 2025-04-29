@@ -91,7 +91,7 @@ suspend fun getExtremeWeather(latitude: Double, longitude: Double,
         }
     }
     val unit = response.hourlyUnits.temperatureUnit
-    return ExtremeWeather(maxTemperature.toString() + unit, maxTemperature.toString() + unit,
+    return ExtremeWeather(minTemperature.toString() + unit, maxTemperature.toString() + unit,
                           response.hourly.time[minIndex], response.hourly.time[maxIndex])
 }
 
