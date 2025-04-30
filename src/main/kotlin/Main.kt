@@ -62,52 +62,45 @@ suspend fun getWeather(latitude: Double, longitude: Double, startDate: String, e
 }
 
 // погода в данном месте в данное время
-suspend fun getCurrentWeather(latitude: Double, longitude: Double, date: String, time: Int): String {
-    val response = getWeather(latitude, longitude, date, date)
-    return response.hourly.temperatures[time].toString() + response.hourlyUnits.temperatureUnit
+suspend fun getCurrentWeather(arguments : ArgumentsForCurrentWeather): String {
+    val response = getWeather(arguments.coordinates.latitude, arguments.coordinates.longitude,
+                              arguments.date, arguments.date)
+    return response.hourly.temperatures[arguments.time].toString() + response.hourlyUnits.temperatureUnit
 }
 
 data class ExtremeWeather(val minTemperature: String, val maxTemperature: String,
                           val minData: String, val maxData: String)
 
 // экстремальные значения погоды в промежутке времени
-suspend fun getExtremeWeather(latitude: Double, longitude: Double,
-                              startDate: String, endDate: String): ExtremeWeather {
-    val response = getWeather(latitude, longitude, startDate, endDate)
+suspend fun getExtremeWeather(arguments : ArgumentsForExtremalWeather): ExtremeWeather {
+    val response = getWeather(arguments.coordinates.latitude, arguments.coordinates.longitude,
+                              arguments.startDate, arguments.endDate)
 
-    var minTemperature : Double = 500.0
-    var maxTemperature : Double = -500.0
-    var minIndex = 0
-    var maxIndex = 0
+    val temperatures = response.hourly.temperatures
+    val (minimumTemperatureIndex, minimumTemperature) = temperatures.withIndex().minBy { it.value }
+    val (maximumTemperatureIndex, maximumTemperature) = temperatures.withIndex().minBy { it.value }
 
-    for (i in 0..<response.hourly.temperatures.size) {
-        if (response.hourly.temperatures[i] >= maxTemperature) {
-            maxTemperature = response.hourly.temperatures[i]
-            maxIndex = i
-        }
-        if (response.hourly.temperatures[i] <= minTemperature) {
-            minTemperature = response.hourly.temperatures[i]
-            minIndex = i
-        }
-    }
     val unit = response.hourlyUnits.temperatureUnit
-    return ExtremeWeather(minTemperature.toString() + unit, maxTemperature.toString() + unit,
-                          response.hourly.time[minIndex], response.hourly.time[maxIndex])
+    return ExtremeWeather(minimumTemperature.toString() + unit,
+                          maximumTemperature.toString() + unit,
+                          response.hourly.time[minimumTemperatureIndex],
+                          response.hourly.time[maximumTemperatureIndex])
 }
 
 // все возможные проверки корректности введенных данных
 
-
 // координаты
-fun checkCoordinates(latitude: String, longitude: String): Boolean {
-    return try {
-        val latitudeInt = latitude.toDouble()
-        val longitudeInt = longitude.toDouble()
-
-        (-90 <= latitudeInt) and (latitudeInt <= 90) and (-180 <= longitudeInt) and (longitudeInt <= 180)
-    } catch (e: NumberFormatException) {
-        false
+data class Coordinates(val latitude: Double, val longitude: Double)
+fun checkCoordinates(latitude: String, longitude: String): Coordinates? {
+    val latitudeInt = latitude.toDoubleOrNull()
+    val longitudeInt = longitude.toDoubleOrNull()
+    if (latitudeInt == null || longitudeInt == null) {
+        return null
     }
+    if  (latitudeInt in -90.0..90.0 &&  longitudeInt in -180.0..180.0) {
+        return Coordinates(latitudeInt, longitudeInt)
+    }
+    return null
 }
 
 // дата
@@ -117,7 +110,7 @@ fun checkDate(dateString: String): Boolean {
         val dateFormated = LocalDate.parse(dateString, formatter)
         val currentDate = LocalDate.now()
 
-        return dateFormated.isBefore(currentDate) || dateFormated.isEqual(currentDate)
+        return dateFormated <= currentDate
     } catch (e: DateTimeParseException) {
          false
     }
@@ -129,56 +122,81 @@ fun checkTwoDates(startDate : String, endDate : String): Boolean {
     val startDateFormated = LocalDate.parse(startDate, formatter)
     val endDateFormated = LocalDate.parse(endDate, formatter)
 
-    return startDateFormated.isBefore(endDateFormated) || startDateFormated.isEqual(endDateFormated)
+    return startDateFormated <= endDateFormated
 }
 
 //время
-fun checkTime(time: String): Boolean {
+fun checkTime(time: String): Int? {
     val parsedTime = time.split(":")
-    if (parsedTime.size != 2) return false
-
-    return try {
-        val hours = parsedTime[0].toInt()
-        val minutes = parsedTime[1].toInt()
-
-        hours in 0..23 && minutes in 0..59
-    } catch (e: NumberFormatException) {
-        false
+    if (parsedTime.size != 2) {
+        return null
     }
+
+    val hours = parsedTime[0].toIntOrNull()
+    val minutes = parsedTime[1].toIntOrNull()
+
+    if (hours == null || minutes == null) {
+        return null
+    }
+
+    if (hours in 0..23 && minutes in 0..59) {
+        return hours
+    }
+    return null
 }
 
-// общая проверка аргументов
-fun checkArguments(scenario: Int, argumentsString: String): Boolean {
+data class ArgumentsForCurrentWeather(val coordinates: Coordinates, val date: String, val time: Int)
+
+// общая проверка аргументов(случай 1)
+fun checkAndParseCurrentArguments(argumentsString: String): ArgumentsForCurrentWeather? {
     val arguments = argumentsString.split(" ")
     if (arguments.size != 4) {
         println("Введено некорректное число аргументов\n")
-        return false
+        return null
     }
-    if (!checkCoordinates(arguments[0], arguments[1])) {
+    val coordinates = checkCoordinates(arguments[0], arguments[1])
+    if (coordinates == null) {
         println("Введены некорректные координаты\n")
-        return false
+        return null
     }
-    if (!checkDate(arguments[2])) {
+    val date = arguments[2]
+    if (!checkDate(date)) {
         println("Введена некорректная дата\n")
-        return false
+        return null
     }
+    val time = checkTime(arguments[3])
+    if (time == null) {
+        println("Введено некорректное время\n")
+        return null
+    }
+    return ArgumentsForCurrentWeather(coordinates, date, time)
+}
 
-    if (scenario == 1) {
-        if (!checkTime(arguments[3])) {
-            println("Введено некорректное время\n")
-            return false
-        }
-    } else if (scenario == 2) {
-        if (!checkDate(arguments[3])) {
-            println("Введена некорректная дата\n")
-            return false
-        }
-        if (!checkTwoDates(arguments[2], arguments[3])) {
-            println("Введен некорректный порядок дат\n")
-            return false
-        }
+data class ArgumentsForExtremalWeather(val coordinates: Coordinates, val startDate: String, val endDate: String)
+
+// общая проверка аргументов (случай 2)
+fun checkAndParseExtremalArguments(argumentsString: String): ArgumentsForExtremalWeather? {
+    val arguments = argumentsString.split(" ")
+    if (arguments.size != 4) {
+        println("Введено некорректное число аргументов\n")
+        return null
     }
-    return true
+    val coordinates = checkCoordinates(arguments[0], arguments[1])
+    if (coordinates == null) {
+        println("Введены некорректные координаты\n")
+        return null
+    }
+    val startDate = arguments[2]
+    val endDate = arguments[3]
+    if (!checkDate(startDate) || !checkDate(endDate)) {
+        println("Введена некорректная дата\n")
+        return null
+    }
+    if (!checkTwoDates(startDate, endDate)) {
+        println("Введен некорректный порядок дат\n")
+        return null
+    }
+    return ArgumentsForExtremalWeather(coordinates, startDate, endDate)
 }
 
 suspend fun main() {
@@ -199,14 +217,8 @@ suspend fun main() {
             )
             val argumentsString = readln()
             println()
-            if (!checkArguments(1, argumentsString)) {
-                continue
-            }
-            val arguments = argumentsString.split(" ")
-            val temperature = getCurrentWeather(
-                arguments[0].toDouble(), arguments[1].toDouble(),
-                arguments[2], arguments[3].substring(0, 2).toInt()
-            )
+            val parsedArguments = checkAndParseCurrentArguments(argumentsString) ?: continue
+            val temperature = getCurrentWeather(parsedArguments)
 
             println("Температура по запросу $temperature\n")
         } else if (scenario == "2") {
@@ -217,12 +229,9 @@ suspend fun main() {
 
             val argumentsString = readln()
             println()
-            if (!checkArguments(2, argumentsString)) {
-                continue
-            }
-            val arguments = argumentsString.split(" ")
+            val parsedArguments = checkAndParseExtremalArguments(argumentsString) ?: continue
             val extremeTemperatures =
-                getExtremeWeather(arguments[0].toDouble(), arguments[1].toDouble(), arguments[2], arguments[3])
+                getExtremeWeather(parsedArguments)
 
 
             println(
